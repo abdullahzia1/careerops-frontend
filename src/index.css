@@ -214,7 +214,7 @@ button:disabled {
   font-size: 0.85rem;
 }
 
-/* ── Status badges ─────────────────────────────────────────────────── */
+/* ── Status badges────── */
 
 .status-badge {
   display: inline-flex;
@@ -234,7 +234,7 @@ button:disabled {
 .status-succeeded { color: #4ade80; border-color: #4ade80; }
 .status-failed  { color: var(--danger); border-color: var(--danger); }
 
-/* ── Score badges ──────────────────────────────────────────────────── */
+/* ── Score badges */
 
 .score-badge {
   display: inline-flex;
@@ -256,7 +256,7 @@ button:disabled {
   .score-low  { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
 }
 
-/* ── Misc tags ─────────────────────────────────────────────────────── */
+/* ── Misc tags─── */
 
 .tag {
   display: inline-block;
@@ -268,7 +268,7 @@ button:disabled {
   color: var(--muted);
 }
 
-/* ── Spinner ───────────────────────────────────────────────────────── */
+/* ── Spinner───── */
 
 .spinner {
   display: inline-block;
@@ -291,7 +291,7 @@ button:disabled {
   to { transform: rotate(360deg); }
 }
 
-/* ── Job cards ─────────────────────────────────────────────────────── */
+/* ── Job cards─── */
 
 .job-card {
   display: block;
@@ -308,13 +308,13 @@ button:disabled {
   margin-top: 0;
 }
 
-/* ── Report card (markdown container) ────────────────────────────── */
+/* ── Report card (markdown container) ───── */
 
 .report-card h2 {
   margin-bottom: 1rem;
 }
 
-/* ── JD pre-block ──────────────────────────────────────────────────── */
+/* ── JD pre-block */
 
 .jd-pre {
   white-space: pre-wrap;
@@ -327,7 +327,7 @@ button:disabled {
   overflow-y: auto;
 }
 
-/* ── Markdown body ─────────────────────────────────────────────────── */
+/* ── Markdown body────── */
 
 .markdown-body {
   line-height: 1.7;

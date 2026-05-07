@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiUrl, readErrorMessage } from "../api/client";
 
-// ── Types matching backend PatternsService exactly ──────────────────
+// ── Types matching backend PatternsService exactly ──────
 
 interface ScoreStats {
   avg: number;
@@ -99,7 +99,7 @@ async function fetchPatterns(minThreshold: number): Promise<PatternsResponse> {
   return res.json() as Promise<PatternsResponse>;
 }
 
-// ── Small components ─────────────────────────────────────────────────
+// ── Small components────
 
 function StatCard({
   label,
@@ -164,7 +164,7 @@ const impactColor: Record<string, string> = {
   low: "var(--accent)",
 };
 
-// ── Main page ────────────────────────────────────────────────────────
+// ── Main page────
 
 export function PatternsPage() {
   const [minThreshold, setMinThreshold] = useState(3);
