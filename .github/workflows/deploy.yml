@@ -24,6 +24,8 @@ jobs:
       - run: npm install
       - run: npx tsc --noEmit
       - run: npm run build
+        env:
+          VITE_API_ORIGIN: https://api.careerops.enovisoft.com
 
   deploy:
     name: Sync to S3 & Invalidate CloudFront
@@ -40,6 +42,8 @@ jobs:
           cache: 'npm'
 
       - name: Build
+        env:
+          VITE_API_ORIGIN: https://api.careerops.enovisoft.com
         run: |
           npm install
           npm run build
