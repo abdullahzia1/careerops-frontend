@@ -26,10 +26,63 @@ interface ScanResult {
   dryRun: boolean;
 }
 
+function normalizeScanResult(raw: unknown): ScanResult {
+  if (!raw || typeof raw !== "object") {
+    return {
+      scanned: 0,
+      newJobs: 0,
+      jobs: [],
+      skipped: 0,
+      errors: ["Invalid scan response from server"],
+      dryRun: false,
+    };
+  }
+  const r = raw as Record<string, unknown>;
+  const jobsRaw = r.jobs;
+  const jobs: ScanJob[] = Array.isArray(jobsRaw)
+    ? jobsRaw
+        .filter((j): j is Record<string, unknown> => j != null && typeof j === "object")
+        .map((j) => ({
+          title: String(j.title ?? ""),
+          company: String(j.company ?? ""),
+          url: String(j.url ?? ""),
+          source: String(j.source ?? ""),
+          postedAt: typeof j.postedAt === "string" ? j.postedAt : undefined,
+        }))
+    : [];
+  const errRaw = r.errors;
+  const errors: string[] = Array.isArray(errRaw)
+    ? errRaw.map((e) => (typeof e === "string" ? e : JSON.stringify(e)))
+    : [];
+
+  const scannedNum = Number(r.scanned);
+  const newJobsNum = Number(r.newJobs);
+  const skippedNum = Number(r.skipped);
+
+  return {
+    scanned: Number.isFinite(scannedNum) ? scannedNum : 0,
+    newJobs: Number.isFinite(newJobsNum) ? newJobsNum : jobs.length,
+    jobs,
+    skipped: Number.isFinite(skippedNum) ? skippedNum : 0,
+    errors,
+    dryRun: Boolean(r.dryRun),
+  };
+}
+
 async function fetchPortals(): Promise<Portal[]> {
   const res = await fetch(apiUrl("/api/v1/scan/portals"));
   if (!res.ok) throw new Error(await readErrorMessage(res));
-  return res.json() as Promise<Portal[]>;
+  const raw: unknown = await res.json();
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const p = item as Record<string, unknown>;
+    return {
+      name: String(p.name ?? ""),
+      greenhouse: typeof p.greenhouse === "string" ? p.greenhouse : undefined,
+      ashby: typeof p.ashby === "string" ? p.ashby : undefined,
+      lever: typeof p.lever === "string" ? p.lever : undefined,
+    };
+  });
 }
 
 async function runScan(params: {
@@ -43,7 +96,8 @@ async function runScan(params: {
     method: "POST",
   });
   if (!res.ok) throw new Error(await readErrorMessage(res));
-  return res.json() as Promise<ScanResult>;
+  const raw: unknown = await res.json();
+  return normalizeScanResult(raw);
 }
 
 export function ScanPage() {

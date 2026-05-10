@@ -1,10 +1,12 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { AppErrorBoundary } from "./AppErrorBoundary";
 
 function navCls({ isActive }: { isActive: boolean }) {
   return isActive ? "active-nav" : undefined;
 }
 
 export function Layout() {
+  const location = useLocation();
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -40,7 +42,9 @@ export function Layout() {
         </nav>
       </header>
       <main className="app-main">
-        <Outlet />
+        <AppErrorBoundary key={location.pathname}>
+          <Outlet />
+        </AppErrorBoundary>
       </main>
     </div>
   );
