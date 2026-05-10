@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiUrl, readErrorMessage } from "../api/client";
 import { PdfViewer } from "../components/PdfViewer";
 
@@ -13,6 +13,31 @@ interface CompileError {
   message: string;
   logSnippet?: string;
 }
+
+interface JdResult {
+  company: string | null;
+  role: string | null;
+  jdText: string;
+  sourceUrl: string | null;
+}
+
+interface KeywordBundle {
+  hardSkills: string[];
+  softSkills: string[];
+  tools: string[];
+  certifications: string[];
+  acronyms: string[];
+  missingFromCv: string[];
+}
+
+interface InjectionResult {
+  tex: string;
+  added: string[];
+  skipped: string[];
+  error?: string;
+}
+
+type InjectStrategy = "skills" | "ai";
 
 async function fetchTemplate(): Promise<string> {
   const res = await fetch(apiUrl("/api/v1/latex/template"));
@@ -50,8 +75,17 @@ export function ResumeBuilderPage() {
   const [validateLoading, setValidateLoading] = useState<boolean>(false);
   const [validateError, setValidateError] = useState<string | null>(null);
 
+  // JD keyword extraction state.
+  const [jdUrl, setJdUrl] = useState<string>("");
+  const [jdText, setJdText] = useState<string>("");
+  const [showPaste, setShowPaste] = useState<boolean>(false);
+  const [keywords, setKeywords] = useState<KeywordBundle | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [injectionFeedback, setInjectionFeedback] = useState<InjectionResult | null>(null);
+
   const compileAbort = useRef<AbortController | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const fetchKeywordsAbort = useRef<AbortController | null>(null);
 
   const template = useQuery({
     queryKey: ["latex-template"],
@@ -168,10 +202,122 @@ export function ResumeBuilderPage() {
       setPreviewBytes(null);
       setCompileError(null);
       setValidateResult(null);
+      setKeywords(null);
+      setPicked(new Set());
+      setInjectionFeedback(null);
+    }
+  }
+
+  // ── JD keyword pipeline ────────────────────────────────────────────────
+
+  const fetchKeywords = useMutation<
+    { jd: JdResult; keywords: KeywordBundle },
+    Error,
+    { url?: string; text?: string }
+  >({
+    mutationFn: async (input) => {
+      fetchKeywordsAbort.current?.abort();
+      const ctrl = new AbortController();
+      fetchKeywordsAbort.current = ctrl;
+
+      const jdRes = await fetch(apiUrl("/api/v1/jd/extract"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+        signal: ctrl.signal,
+      });
+      if (!jdRes.ok) throw new Error(await readErrorMessage(jdRes));
+      const jd = (await jdRes.json()) as JdResult;
+
+      const kwRes = await fetch(apiUrl("/api/v1/jd/keywords"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jdText: jd.jdText, cv: tex }),
+        signal: ctrl.signal,
+      });
+      if (!kwRes.ok) throw new Error(await readErrorMessage(kwRes));
+      const keywordsBody = (await kwRes.json()) as KeywordBundle;
+      return { jd, keywords: keywordsBody };
+    },
+    onSuccess: ({ keywords: kw }) => {
+      setKeywords(kw);
+      setPicked(new Set(kw.missingFromCv));
+      setInjectionFeedback(null);
+    },
+  });
+
+  const inject = useMutation<InjectionResult, Error, InjectStrategy>({
+    mutationFn: async (strategy) => {
+      const res = await fetch(apiUrl("/api/v1/latex/inject-keywords"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tex,
+          keywords: Array.from(picked),
+          strategy,
+        }),
+      });
+      if (!res.ok) throw new Error(await readErrorMessage(res));
+      return (await res.json()) as InjectionResult;
+    },
+    onSuccess: (result) => {
+      setInjectionFeedback(result);
+      if (result.added.length > 0) {
+        setEditedTex(result.tex);
+        // Drop the previously-rendered PDF so the user knows the new compile
+        // hasn't happened yet, then auto-trigger a recompile.
+        swapPreviewUrl(null);
+        setPreviewBytes(null);
+        void handleCompile();
+      }
+    },
+  });
+
+  function togglePicked(keyword: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(keyword)) next.delete(keyword);
+      else next.add(keyword);
+      return next;
+    });
+  }
+
+  function selectAllMissing() {
+    if (keywords) setPicked(new Set(keywords.missingFromCv));
+  }
+
+  function clearPicked() {
+    setPicked(new Set());
+  }
+
+  function handleFetchKeywords() {
+    setInjectionFeedback(null);
+    if (showPaste) {
+      const t = jdText.trim();
+      if (t.length < 40) {
+        fetchKeywords.reset();
+        return;
+      }
+      fetchKeywords.mutate({ text: t });
+    } else {
+      const u = jdUrl.trim();
+      if (!u) return;
+      fetchKeywords.mutate({ url: u });
     }
   }
 
   const seedError = template.error ? (template.error as Error).message : null;
+
+  const missingSet = useMemo(
+    () => new Set((keywords?.missingFromCv ?? []).map((k) => k.toLowerCase())),
+    [keywords],
+  );
+  const fetchKeywordsError = fetchKeywords.error ? fetchKeywords.error.message : null;
+  const injectError =
+    inject.error?.message ??
+    (injectionFeedback?.error && injectionFeedback.added.length === 0
+      ? injectionFeedback.error
+      : null);
 
   return (
     <section className="card stack full-bleed" style={{ gap: "1rem" }}>
@@ -315,6 +461,29 @@ export function ResumeBuilderPage() {
         </div>
       )}
 
+      {/* JD keyword extraction & injection */}
+      <JdKeywordsPanel
+        jdUrl={jdUrl}
+        setJdUrl={setJdUrl}
+        jdText={jdText}
+        setJdText={setJdText}
+        showPaste={showPaste}
+        setShowPaste={setShowPaste}
+        keywords={keywords}
+        picked={picked}
+        togglePicked={togglePicked}
+        selectAllMissing={selectAllMissing}
+        clearPicked={clearPicked}
+        missingSet={missingSet}
+        onFetch={handleFetchKeywords}
+        fetchLoading={fetchKeywords.isPending}
+        fetchError={fetchKeywordsError}
+        onInject={(strategy) => inject.mutate(strategy)}
+        injectLoading={inject.isPending}
+        injectError={injectError}
+        injectionFeedback={injectionFeedback}
+      />
+
       <div
         style={{
           display: "grid",
@@ -376,5 +545,348 @@ export function ResumeBuilderPage() {
         </div>
       )}
     </section>
+  );
+}
+
+// ── JD keyword sub-component ─────────────────────────────────────────────
+
+interface JdKeywordsPanelProps {
+  jdUrl: string;
+  setJdUrl: (v: string) => void;
+  jdText: string;
+  setJdText: (v: string) => void;
+  showPaste: boolean;
+  setShowPaste: (v: boolean) => void;
+  keywords: KeywordBundle | null;
+  picked: Set<string>;
+  togglePicked: (kw: string) => void;
+  selectAllMissing: () => void;
+  clearPicked: () => void;
+  missingSet: Set<string>;
+  onFetch: () => void;
+  fetchLoading: boolean;
+  fetchError: string | null;
+  onInject: (strategy: InjectStrategy) => void;
+  injectLoading: boolean;
+  injectError: string | null;
+  injectionFeedback: InjectionResult | null;
+}
+
+function JdKeywordsPanel({
+  jdUrl,
+  setJdUrl,
+  jdText,
+  setJdText,
+  showPaste,
+  setShowPaste,
+  keywords,
+  picked,
+  togglePicked,
+  selectAllMissing,
+  clearPicked,
+  missingSet,
+  onFetch,
+  fetchLoading,
+  fetchError,
+  onInject,
+  injectLoading,
+  injectError,
+  injectionFeedback,
+}: JdKeywordsPanelProps) {
+  const groups: Array<{ label: string; items: string[] }> = keywords
+    ? [
+        { label: "Hard skills", items: keywords.hardSkills },
+        { label: "Tools", items: keywords.tools },
+        { label: "Soft skills", items: keywords.softSkills },
+        { label: "Certifications", items: keywords.certifications },
+        { label: "Acronyms", items: keywords.acronyms },
+      ].filter((g) => g.items.length > 0)
+    : [];
+
+  const showAddedBanner =
+    injectionFeedback && injectionFeedback.added.length > 0;
+  const showRejectedBanner =
+    injectionFeedback &&
+    injectionFeedback.added.length === 0 &&
+    !!injectionFeedback.error;
+
+  return (
+    <div
+      className="stack"
+      style={{
+        gap: "0.75rem",
+        padding: "0.85rem",
+        border: "1px solid var(--border)",
+        borderRadius: 8,
+        background: "rgba(255,255,255,0.02)",
+      }}
+    >
+      <div className="row spread" style={{ marginTop: 0, alignItems: "flex-start", gap: "0.75rem" }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <strong style={{ fontSize: "0.95rem" }}>Tailor to a job description</strong>
+          <p className="muted small" style={{ margin: "0.2rem 0 0" }}>
+            Paste a Greenhouse / Ashby / Lever job URL — we&apos;ll fetch it and ask Gemini to extract ATS keywords.
+            Pick the ones you want and inject them into your LaTeX.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowPaste(!showPaste)}
+          style={{
+            background: "transparent",
+            color: "var(--accent)",
+            border: "1px solid var(--border)",
+            fontSize: "0.85rem",
+          }}
+        >
+          {showPaste ? "Use URL instead" : "Paste JD instead"}
+        </button>
+      </div>
+
+      {!showPaste ? (
+        <div className="row" style={{ marginTop: 0, gap: "0.5rem", flexWrap: "wrap" }}>
+          <input
+            type="url"
+            value={jdUrl}
+            onChange={(e) => setJdUrl(e.target.value)}
+            placeholder="https://job-boards.greenhouse.io/anthropic/jobs/5161980008"
+            spellCheck={false}
+            style={{
+              flex: "1 1 24rem",
+              minWidth: 0,
+              padding: "0.45rem 0.6rem",
+              borderRadius: 6,
+              border: "1px solid var(--border)",
+              background: "var(--bg)",
+              color: "var(--text)",
+              fontSize: "0.9rem",
+            }}
+          />
+          <button
+            type="button"
+            onClick={onFetch}
+            disabled={fetchLoading || !jdUrl.trim()}
+          >
+            {fetchLoading ? (
+              <>
+                <span className="spinner spinner-sm" /> Fetching…
+              </>
+            ) : (
+              "Fetch keywords"
+            )}
+          </button>
+        </div>
+      ) : (
+        <div className="stack" style={{ gap: "0.5rem" }}>
+          <textarea
+            value={jdText}
+            onChange={(e) => setJdText(e.target.value)}
+            placeholder="Paste the job description here…"
+            rows={8}
+            spellCheck={false}
+            style={{
+              width: "100%",
+              padding: "0.5rem 0.6rem",
+              borderRadius: 6,
+              border: "1px solid var(--border)",
+              background: "var(--bg)",
+              color: "var(--text)",
+              fontSize: "0.85rem",
+              fontFamily: "inherit",
+              resize: "vertical",
+            }}
+          />
+          <div className="row" style={{ marginTop: 0, justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={onFetch}
+              disabled={fetchLoading || jdText.trim().length < 40}
+              title={jdText.trim().length < 40 ? "Paste at least 40 characters" : undefined}
+            >
+              {fetchLoading ? (
+                <>
+                  <span className="spinner spinner-sm" /> Fetching…
+                </>
+              ) : (
+                "Fetch keywords"
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {fetchError && <p className="error small">{fetchError}</p>}
+
+      {keywords && groups.length === 0 && (
+        <p className="muted small" style={{ margin: 0 }}>
+          No keywords extracted from this JD. Try a different URL or paste the
+          description directly.
+        </p>
+      )}
+
+      {groups.length > 0 && (
+        <div className="stack" style={{ gap: "0.6rem" }}>
+          <div className="row" style={{ marginTop: 0, gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+            <span className="muted small">
+              {picked.size} selected · {keywords?.missingFromCv.length ?? 0} missing from CV
+            </span>
+            <button
+              type="button"
+              onClick={selectAllMissing}
+              disabled={(keywords?.missingFromCv.length ?? 0) === 0}
+              style={{
+                background: "transparent",
+                color: "var(--accent)",
+                border: "1px solid var(--border)",
+                fontSize: "0.8rem",
+                padding: "0.25rem 0.55rem",
+              }}
+            >
+              Select all missing
+            </button>
+            <button
+              type="button"
+              onClick={clearPicked}
+              disabled={picked.size === 0}
+              style={{
+                background: "transparent",
+                color: "var(--muted, #94a3b8)",
+                border: "1px solid var(--border)",
+                fontSize: "0.8rem",
+                padding: "0.25rem 0.55rem",
+              }}
+            >
+              Clear
+            </button>
+          </div>
+
+          {groups.map((group) => (
+            <div key={group.label}>
+              <div className="muted small" style={{ marginBottom: "0.25rem" }}>
+                {group.label}
+              </div>
+              <div className="row" style={{ marginTop: 0, gap: "0.35rem", flexWrap: "wrap" }}>
+                {group.items.map((kw) => {
+                  const selected = picked.has(kw);
+                  const missing = missingSet.has(kw.toLowerCase());
+                  return (
+                    <button
+                      key={`${group.label}-${kw}`}
+                      type="button"
+                      onClick={() => togglePicked(kw)}
+                      title={missing ? "Not in your CV yet" : "Already present in your CV"}
+                      style={{
+                        padding: "0.2rem 0.55rem",
+                        borderRadius: 999,
+                        fontSize: "0.78rem",
+                        border: `1px solid ${selected ? "var(--accent)" : "var(--border)"}`,
+                        background: selected
+                          ? "rgba(56, 189, 248, 0.18)"
+                          : missing
+                            ? "rgba(248, 113, 113, 0.08)"
+                            : "transparent",
+                        color: selected ? "var(--accent)" : "var(--text)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {kw}
+                      {missing && (
+                        <span
+                          style={{
+                            marginLeft: "0.3rem",
+                            fontSize: "0.65rem",
+                            color: "var(--danger, #f87171)",
+                          }}
+                        >
+                          missing
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          <div
+            className="row"
+            style={{
+              marginTop: "0.25rem",
+              gap: "0.5rem",
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => onInject("skills")}
+              disabled={picked.size === 0 || injectLoading}
+              title="Deterministic merge into the Technical Skills section. Cannot break compilation."
+            >
+              {injectLoading ? (
+                <>
+                  <span className="spinner spinner-sm" /> Injecting…
+                </>
+              ) : (
+                `Add ${picked.size || ""} keyword${picked.size === 1 ? "" : "s"} (Skills only)`
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => onInject("ai")}
+              disabled={picked.size === 0 || injectLoading}
+              title="Ask Gemini to weave keywords into bullets across the resume. Validated and rolled back on failure."
+              style={{
+                background: "transparent",
+                color: "var(--accent)",
+                border: "1px solid var(--accent)",
+              }}
+            >
+              AI rewrite
+            </button>
+          </div>
+
+          {showAddedBanner && injectionFeedback && (
+            <div
+              style={{
+                padding: "0.55rem 0.75rem",
+                borderRadius: 6,
+                border: "1px solid #166534",
+                background: "#052e16",
+                color: "#86efac",
+                fontSize: "0.85rem",
+              }}
+            >
+              Added {injectionFeedback.added.length} keyword{injectionFeedback.added.length === 1 ? "" : "s"}
+              {injectionFeedback.skipped.length > 0 && (
+                <>, skipped {injectionFeedback.skipped.length}</>
+              )}
+              . Recompiling preview…
+            </div>
+          )}
+
+          {showRejectedBanner && injectionFeedback?.error && (
+            <div
+              style={{
+                padding: "0.55rem 0.75rem",
+                borderRadius: 6,
+                border: "1px solid #991b1b",
+                background: "#2d0707",
+                color: "#fecaca",
+                fontSize: "0.85rem",
+              }}
+            >
+              {injectionFeedback.error.includes("AI") || injectionFeedback.error.toLowerCase().includes("invalid")
+                ? "AI rewrite was rejected (would have broken compilation). Try Skills-only."
+                : injectionFeedback.error}
+            </div>
+          )}
+
+          {injectError && !injectionFeedback?.error && (
+            <p className="error small">{injectError}</p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
