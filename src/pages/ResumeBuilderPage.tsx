@@ -20,9 +20,23 @@ async function fetchTemplate(): Promise<string> {
   return body.tex;
 }
 
+const DEFAULT_FILENAME = "resume";
+
+/**
+ * Strip path separators and any user-supplied .pdf extension. Lets the user
+ * type freely (including spaces) but always sends a safe slug + ".pdf" to the
+ * server and uses it for the download attribute.
+ */
+function sanitizeFilenameStem(raw: string): string {
+  const trimmed = raw.trim().replace(/\.pdf$/i, "");
+  const cleaned = trimmed.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-");
+  return cleaned || DEFAULT_FILENAME;
+}
+
 export function ResumeBuilderPage() {
   const [tex, setTex] = useState<string>("");
   const [seeded, setSeeded] = useState<boolean>(false);
+  const [filename, setFilename] = useState<string>(DEFAULT_FILENAME);
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [compileLoading, setCompileLoading] = useState<boolean>(false);
@@ -82,7 +96,10 @@ export function ResumeBuilderPage() {
       const res = await fetch(apiUrl("/api/v1/latex/compile"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tex, filename: "cv.pdf" }),
+        body: JSON.stringify({
+          tex,
+          filename: `${sanitizeFilenameStem(filename)}.pdf`,
+        }),
         signal: ctrl.signal,
       });
 
@@ -139,7 +156,7 @@ export function ResumeBuilderPage() {
     if (!previewUrl) return;
     const a = document.createElement("a");
     a.href = previewUrl;
-    a.download = `cv-${new Date().toISOString().slice(0, 10)}.pdf`;
+    a.download = `${sanitizeFilenameStem(filename)}.pdf`;
     a.click();
   }
 
@@ -155,17 +172,58 @@ export function ResumeBuilderPage() {
   const seedError = template.error ? (template.error as Error).message : null;
 
   return (
-    <section className="card stack" style={{ gap: "1rem" }}>
+    <section className="card stack full-bleed" style={{ gap: "1rem" }}>
       <div className="row spread" style={{ marginTop: 0 }}>
         <div>
-          <h1 style={{ margin: 0 }}>Resume Builder</h1>
           <p className="muted small" style={{ margin: "0.25rem 0 0" }}>
             Edit the LaTeX source on the left, hit{" "}
             <strong>Compile preview</strong> to render it on the right, then{" "}
             <strong>Download PDF</strong> when you are happy with the layout.
           </p>
         </div>
-        <div className="row" style={{ marginTop: 0, gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="row" style={{ marginTop: 0, gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "stretch",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              overflow: "hidden",
+              background: "var(--bg)",
+              fontSize: "0.875rem",
+            }}
+            title="Filename used when you download the PDF (extension is added automatically)"
+          >
+            <input
+              id="resume-filename"
+              type="text"
+              value={filename}
+              onChange={(e) => setFilename(e.target.value)}
+              placeholder={DEFAULT_FILENAME}
+              spellCheck={false}
+              aria-label="Resume filename"
+              style={{
+                background: "transparent",
+                color: "var(--text)",
+                border: "none",
+                outline: "none",
+                padding: "0.4rem 0.6rem",
+                width: "10rem",
+                fontSize: "0.875rem",
+              }}
+            />
+            <span
+              style={{
+                padding: "0.4rem 0.6rem",
+                background: "rgba(255,255,255,0.04)",
+                color: "var(--muted, #94a3b8)",
+                borderLeft: "1px solid var(--border)",
+                userSelect: "none",
+              }}
+            >
+              .pdf
+            </span>
+          </div>
           <button
             type="button"
             onClick={handleResetToTemplate}
