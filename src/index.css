@@ -102,6 +102,12 @@ a {
   margin: 0 auto;
 }
 
+/* react-pdf rendered pages — give them a paper-like drop shadow inside the viewer */
+.pdf-page-shadow {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  background: #fff;
+}
+
 /* Opt-in: lets a single section break out of .app-main's max-width
    and span the full viewport (e.g. the Resume Builder editor + preview).
    100vw can be wider than the document when a vertical scrollbar exists,

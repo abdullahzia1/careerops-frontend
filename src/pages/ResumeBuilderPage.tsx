@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiUrl, readErrorMessage } from "../api/client";
+import { PdfViewer } from "../components/PdfViewer";
 
 interface ValidateResult {
   valid: boolean;
@@ -34,11 +35,14 @@ function sanitizeFilenameStem(raw: string): string {
 }
 
 export function ResumeBuilderPage() {
-  const [tex, setTex] = useState<string>("");
-  const [seeded, setSeeded] = useState<boolean>(false);
+  // `editedTex` is `null` until the user changes anything — `tex` is then
+  // derived from the cached template, removing the need for an effect/ref to
+  // copy the seed into state.
+  const [editedTex, setEditedTex] = useState<string | null>(null);
   const [filename, setFilename] = useState<string>(DEFAULT_FILENAME);
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewBytes, setPreviewBytes] = useState<Uint8Array | null>(null);
   const [compileLoading, setCompileLoading] = useState<boolean>(false);
   const [compileError, setCompileError] = useState<CompileError | null>(null);
 
@@ -49,19 +53,13 @@ export function ResumeBuilderPage() {
   const compileAbort = useRef<AbortController | null>(null);
   const previewUrlRef = useRef<string | null>(null);
 
-  // Seed editor with cv-template.tex on first visit only.
   const template = useQuery({
     queryKey: ["latex-template"],
     queryFn: fetchTemplate,
     staleTime: Infinity,
   });
 
-  useEffect(() => {
-    if (!seeded && template.data && tex === "") {
-      setTex(template.data);
-      setSeeded(true);
-    }
-  }, [seeded, template.data, tex]);
+  const tex = editedTex ?? template.data ?? "";
 
   // Keep ref in sync so the unmount cleanup revokes the latest URL.
   useEffect(() => {
@@ -105,7 +103,10 @@ export function ResumeBuilderPage() {
 
       const ct = res.headers.get("Content-Type") ?? "";
       if (res.ok && ct.includes("application/pdf")) {
-        const blob = await res.blob();
+        const buffer = await res.arrayBuffer();
+        // Hand react-pdf its own copy — pdf.js may detach the buffer it parses.
+        setPreviewBytes(new Uint8Array(buffer.slice(0)));
+        const blob = new Blob([buffer], { type: "application/pdf" });
         swapPreviewUrl(URL.createObjectURL(blob));
         return;
       }
@@ -162,8 +163,9 @@ export function ResumeBuilderPage() {
 
   function handleResetToTemplate() {
     if (template.data) {
-      setTex(template.data);
+      setEditedTex(null);
       swapPreviewUrl(null);
+      setPreviewBytes(null);
       setCompileError(null);
       setValidateResult(null);
     }
@@ -324,58 +326,21 @@ export function ResumeBuilderPage() {
         <textarea
           className="code-area"
           value={tex}
-          onChange={(e) => setTex(e.target.value)}
+          onChange={(e) => setEditedTex(e.target.value)}
           spellCheck={false}
           placeholder={template.isLoading ? "Loading template…" : "% paste your LaTeX CV here…"}
           style={{ minHeight: "75vh", fontFamily: "monospace", fontSize: "0.85rem" }}
         />
 
-        <div
-          style={{
-            position: "relative",
-            background: "#525659",
-            padding: "1rem",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            minHeight: "75vh",
-            display: "flex",
-          }}
-        >
+        <div style={{ position: "relative", minHeight: "75vh", display: "flex" }}>
           {compileLoading && (
             <span
               className="spinner spinner-sm"
-              style={{ position: "absolute", top: 12, right: 12, zIndex: 1 }}
+              style={{ position: "absolute", top: 12, right: 12, zIndex: 2 }}
               aria-label="Compiling preview"
             />
           )}
-          {previewUrl ? (
-            <iframe
-              title="Compiled CV"
-              src={previewUrl}
-              style={{
-                flex: 1,
-                width: "100%",
-                border: "none",
-                background: "#fff",
-                borderRadius: 4,
-                boxShadow: "0 6px 24px rgba(0, 0, 0, 0.45)",
-              }}
-            />
-          ) : (
-            <div
-              style={{
-                margin: "auto",
-                color: "#cbd5e1",
-                fontSize: "0.9rem",
-                textAlign: "center",
-                maxWidth: "20rem",
-              }}
-            >
-              {compileLoading
-                ? "Compiling…"
-                : "Click \"Compile preview\" to render your LaTeX here."}
-            </div>
-          )}
+          <PdfViewer data={previewBytes} style={{ flex: 1, minHeight: "75vh" }} />
         </div>
       </div>
 
