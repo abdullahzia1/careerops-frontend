@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { apiUrl, readErrorMessage } from "../api/client";
 import type { MeResponse } from "../types/me";
 import { CvEditorSection } from "./CvEditorSection";
-import { CvExportSection } from "./CvExportSection";
 import { ProfileSnapshotSection } from "./ProfileSnapshotSection";
 
 async function fetchMe(): Promise<MeResponse> {
@@ -64,7 +63,6 @@ export function ProfilePage() {
             seedJson={profileSeed}
             etag={profileEtag}
           />
-          <CvExportSection />
         </>
       )}
     </div>

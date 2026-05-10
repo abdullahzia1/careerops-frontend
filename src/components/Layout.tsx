@@ -18,6 +18,9 @@ export function Layout() {
           <NavLink to="/profile" className={navCls}>
             CV / profile
           </NavLink>
+          <NavLink to="/resume-builder" className={navCls}>
+            Resume Builder
+          </NavLink>
           <NavLink to="/evaluate" className={navCls}>
             Evaluate
           </NavLink>

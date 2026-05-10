@@ -7,6 +7,7 @@ import { JobDetailPage } from "./pages/JobDetailPage";
 import { JobsPage } from "./pages/JobsPage";
 import { PatternsPage } from "./pages/PatternsPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { ResumeBuilderPage } from "./pages/ResumeBuilderPage";
 import { ScanPage } from "./pages/ScanPage";
 import { SystemPage } from "./pages/SystemPage";
 import { TrackerPage } from "./pages/TrackerPage";
@@ -18,6 +19,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<DashboardPage />} />
           <Route path="profile" element={<ProfilePage />} />
+          <Route path="resume-builder" element={<ResumeBuilderPage />} />
           <Route path="evaluate" element={<EvaluatePage />} />
           <Route path="jobs" element={<JobsPage />} />
           <Route path="jobs/:id" element={<JobDetailPage />} />
